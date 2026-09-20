@@ -18,21 +18,19 @@ Supports both cantilever and simply supported beams under uniform loading.
 class BeamParameters:
     """Container for beam geometry and material properties."""
     
-    def __init__(self):
+    def __init__(self, length=10.0, num_elements=25, youngs_modulus=200e9, moment_inertia=1.0, density=7800.0):
         # Geometry
-        self.length = 10.0                    # Total beam length (m)
-        self.num_elements = 25                # Number of finite elements
+        self.length = length                    # Total beam length (m)
+        self.num_elements = num_elements                # Number of finite elements
         self.num_nodes = self.num_elements + 1
         self.element_length = self.length / self.num_elements
+        self.youngs_modulus = youngs_modulus           # Young's modulus (Pa)
+        self.moment_inertia = moment_inertia             # Moment of inertia (m^4)
+        self.density = density                 # Material density (kg/m^3)
         
-        # Material properties
-        self.youngs_modulus = 200e9           # Young's modulus (Pa)
-        self.moment_inertia = 1.0             # Moment of inertia (m^4)
-        self.density = 7800.0                 # Material density (kg/m^3)
-        
-        # Derived properties
-        self.node_positions = np.linspace(0, self.length, self.num_nodes)
+        # Create element connectivity and node positions
         self.elements = self._create_element_connectivity()
+        self.node_positions = np.linspace(0, self.length, self.num_nodes)
     
     def _create_element_connectivity(self):
         """Create element connectivity matrix."""
@@ -165,7 +163,7 @@ class LoadApplication:
 # =============================================================================
 
 class BoundaryConditions:
-    """Handles different types of boundary conditions."""
+    """Handles different types of boundary conditions by extended matrix method."""
     
     @staticmethod
     def apply_cantilever_bc(stiffness_matrix, force_vector):
@@ -173,42 +171,86 @@ class BoundaryConditions:
         Apply cantilever boundary conditions (fixed at one end).
         
         Args:
-            stiffness_matrix (np.ndarray): Global stiffness matrix
-            force_vector (np.ndarray): Force vector
+            stiffness_matrix (np.ndarray): Global stiffness matrix S (n×n)
+            force_vector (np.ndarray): Force vector f (n×1)
             
         Returns:
-            tuple: (modified_stiffness, modified_force)
+            tuple: (extended_matrix, extended_force, num_constraints)
+                - extended_matrix: extended stiffness matrix S_e ((n+m)×(n+m))
+                - extended_force: extended force vector ((n+m)×1)
+                - num_constraints: number of constraints m
         """
-        # Remove first two DOFs (displacement and rotation at fixed end)
-        fixed_dofs = [0, 1]
+        n = len(force_vector)  # 原始DOF数量
         
-        K_modified = np.delete(stiffness_matrix, fixed_dofs, axis=0)
-        K_modified = np.delete(K_modified, fixed_dofs, axis=1)
-        F_modified = np.delete(force_vector, fixed_dofs)
+        # 约束的自由度 (displacement and rotation at node 0)
+        constrained_dofs = [0, 1]  # DOF indices: [w0, θ0]
+        m = len(constrained_dofs)  # 约束数量
         
-        return K_modified, F_modified
+        # 构造约束矩阵 C (n×m)
+        # C[i,j] = 1 if DOF i is constrained by constraint j
+        C = np.zeros((n, m))
+        for j, dof in enumerate(constrained_dofs):
+            C[dof, j] = 1.0
+        
+        # 构造扩展矩阵 S_e = [[S, C], [C^T, 0]]
+        # 维度: (n+m) × (n+m)
+        S_extended = np.zeros((n + m, n + m))
+        S_extended[:n, :n] = stiffness_matrix      # 左上：S
+        S_extended[:n, n:] = C                      # 右上：C
+        S_extended[n:, :n] = C.T                    # 左下：C^T
+        # 右下角已经是0
+        
+        # 构造扩展力向量 f_e = [f, a]
+        # 维度: (n+m) × 1
+        f_extended = np.zeros(n + m)
+        f_extended[:n] = force_vector               # 上部：f
+        f_extended[n:] = 0.0                        # 下部：a (约束值，这里都是0)
+        
+        return S_extended, f_extended, m
     
     @staticmethod
     def apply_simply_supported_bc(stiffness_matrix, force_vector, num_nodes):
         """
-        Apply simply supported boundary conditions.
+        Apply simply supported boundary conditions using extended matrix method.
+        The features of simply supported boundary conditions are:
+        free rotation at both ends, but displacement is constrained.
+        
+        constraints:
+        - w[0] = 0      (displacement constraint at left end)
+        - w[n-1] = 0    (displacement constraint at right end)
         
         Args:
-            stiffness_matrix (np.ndarray): Global stiffness matrix
-            force_vector (np.ndarray): Force vector
+            stiffness_matrix (np.ndarray): Global stiffness matrix S
+            force_vector (np.ndarray): Force vector f
             num_nodes (int): Number of nodes
             
         Returns:
-            tuple: (modified_stiffness, modified_force)
+            tuple: (extended_matrix, extended_force, num_constraints)
         """
-        # Remove displacement DOFs at both ends (nodes 0 and n)
-        fixed_dofs = [0, 2 * num_nodes - 2]  # First and last displacement DOFs
+        n = len(force_vector)  # 原始DOF数量
         
-        K_modified = np.delete(stiffness_matrix, fixed_dofs, axis=0)
-        K_modified = np.delete(K_modified, fixed_dofs, axis=1)
-        F_modified = np.delete(force_vector, fixed_dofs)
+        # 约束的自由度 (displacement at both ends)
+        # DOF顺序：[w0, θ0, w1, θ1, ..., w_{n-1}, θ_{n-1}]
+        constrained_dofs = [0, 2 * (num_nodes - 1)]  # [w0, w_{last}]
+        m = len(constrained_dofs)  # 约束数量
         
-        return K_modified, F_modified
+        # 构造约束矩阵 C (n×m)
+        C = np.zeros((n, m))
+        for j, dof in enumerate(constrained_dofs):
+            C[dof, j] = 1.0
+        
+        # 构造扩展矩阵 S_e = [[S, C], [C^T, 0]]
+        S_extended = np.zeros((n + m, n + m))
+        S_extended[:n, :n] = stiffness_matrix
+        S_extended[:n, n:] = C
+        S_extended[n:, :n] = C.T
+        
+        # 构造扩展力向量 f_e = [f, a]
+        f_extended = np.zeros(n + m)
+        f_extended[:n] = force_vector
+        f_extended[n:] = 0.0  # 约束值都是0
+        
+        return S_extended, f_extended, m
 
 # =============================================================================
 # SOLVER AND ANALYSIS
@@ -235,6 +277,7 @@ class BeamAnalysis:
         
         # Analysis results
         self.displacement = None
+        self.rotation = None  # 添加转角存储
         self.global_stiffness = None
         self.global_mass = None
     
@@ -243,17 +286,20 @@ class BeamAnalysis:
         print(f"Analyzing {self.beam_type} beam with load intensity {self.load_intensity} N/m")
         
         # 1. Compute global matrices
+        print("Step 1: Assembling global stiffness matrix...")
         self.global_stiffness, self.global_mass = self.fe_matrices.assemble_global_matrices()
-        print(f"Global stiffness matrix (shape: {self.global_stiffness.shape}):")
-        print(np.round(self.global_stiffness, 2))
+        print(f"  - Global stiffness matrix shape: {self.global_stiffness.shape}\n")
         
         # 2. Apply loads
+        print("Step 2: Applying uniform distributed load...")
         force_vector = self.load_handler.apply_uniform_load(self.load_intensity)
+        print(f"  - Force vector shape: {force_vector.shape}\n")
         
-        # 3. Apply boundary conditions and solve
+        # 3. Apply boundary conditions and solve using extended matrix
+        print("Step 3: Constructing extended matrix and solving...")
         self.displacement = self._solve_system(force_vector)
         
-        print("Analysis completed successfully!")
+        print("\n✓ Analysis completed successfully using extended matrix method!")
         return self.displacement
     
     def _solve_system(self, force_vector):
@@ -266,37 +312,112 @@ class BeamAnalysis:
             raise ValueError(f"Unknown beam type: {self.beam_type}")
     
     def _solve_cantilever(self, force_vector):
-        """Solve cantilever beam system."""
-        K_reduced, F_reduced = BoundaryConditions.apply_cantilever_bc(
+        S_extended, f_extended, m = BoundaryConditions.apply_cantilever_bc(
             self.global_stiffness, force_vector
         )
         
-        # Solve reduced system
-        displacement_reduced = np.linalg.solve(K_reduced, F_reduced)
+        n = len(force_vector)  # 原始DOF数
         
-        # Reconstruct full displacement vector (extract displacement DOFs only)
-        full_displacement = np.zeros(self.beam_params.num_nodes)
-        full_displacement[0] = 0.0  # Fixed end displacement
-        full_displacement[1:] = displacement_reduced[::2]  # Every other element (displacement DOFs)
+        # 求解扩展系统 S_extended · [x, μ]^T = f_extended
+        solution = np.linalg.solve(S_extended, f_extended)
+        
+        # 提取位移和拉格朗日乘子
+        displacement_all_dofs = solution[:n]  # 前n个是位移和转角
+        lagrange_multipliers = solution[n:]   # 后m个是拉格朗日乘子（约束反力）
+        
+        # 存储拉格朗日乘子用于后续分析
+        self.constraint_forces = lagrange_multipliers
+        
+        # 提取位移和转角DOF
+        # DOF顺序：[w0, θ0, w1, θ1, w2, θ2, ...]
+        full_displacement = displacement_all_dofs[::2]  # 偶数索引：w[2i]
+        full_rotation = displacement_all_dofs[1::2]     # 奇数索引：θ[2i+1]
+        
+        # 存储转角数据
+        self.rotation = full_rotation
         
         return full_displacement
     
     def _solve_simply_supported(self, force_vector):
-        """Solve simply supported beam system."""
-        K_reduced, F_reduced = BoundaryConditions.apply_simply_supported_bc(
+        
+        S_extended, f_extended, m = BoundaryConditions.apply_simply_supported_bc(
             self.global_stiffness, force_vector, self.beam_params.num_nodes
         )
         
-        # Solve reduced system
-        displacement_reduced = np.linalg.solve(K_reduced, F_reduced)
+        n = len(force_vector)
         
-        # Reconstruct full displacement vector
-        full_displacement = np.zeros(self.beam_params.num_nodes)
-        full_displacement[0] = 0.0  # Fixed end displacement
-        full_displacement[-1] = 0.0  # Fixed end displacement
-        full_displacement[1:-1] = displacement_reduced[1::2]  # Interior displacement DOFs
+        # 求解扩展系统
+        solution = np.linalg.solve(S_extended, f_extended)
+        
+        # 提取位移和拉格朗日乘子
+        displacement_all_dofs = solution[:n]
+        lagrange_multipliers = solution[n:]
+        
+        # 存储拉格朗日乘子
+        self.constraint_forces = lagrange_multipliers
+        
+        # 提取位移和转角DOF
+        # DOF顺序：[w0, θ0, w1, θ1, w2, θ2, ...]
+        full_displacement = displacement_all_dofs[::2]  # 偶数索引：w[2i]
+        full_rotation = displacement_all_dofs[1::2]     # 奇数索引：θ[2i+1]
+        
+        # 存储转角数据
+        self.rotation = full_rotation
+        
+        print(f"  - Constraint forces (Lagrange multipliers): {lagrange_multipliers}")
         
         return full_displacement
+    
+    def show_extended_matrix_structure(self, max_display=8):
+        """
+        Display the structure of the extended matrix (for educational purposes).
+        显示扩展矩阵的结构（教学用途）
+        """
+        if self.global_stiffness is None:
+            print("请先运行 solve() 方法")
+            return
+        
+        # 创建载荷向量
+        force_vector = self.load_handler.apply_uniform_load(self.load_intensity)
+        
+        # 应用边界条件得到扩展矩阵
+        if self.beam_type == "cantilever":
+            S_extended, f_extended, m = BoundaryConditions.apply_cantilever_bc(
+                self.global_stiffness, force_vector
+            )
+            constrained_dofs = [0, 1]
+        elif self.beam_type == "simply_supported":
+            S_extended, f_extended, m = BoundaryConditions.apply_simply_supported_bc(
+                self.global_stiffness, force_vector, self.beam_params.num_nodes
+            )
+            constrained_dofs = [0, 2 * (self.beam_params.num_nodes - 1)]
+        else:
+            return
+        
+        n = len(force_vector)  # 原始DOF数量
+        
+        print("\n" + "="*80)
+        print("Extended Matrix Structure (Lagrange Multiplier Method)")
+        print("="*80)
+        print(f"Original system size: {n}×{n}")
+        print(f"Number of constraints: {m}")
+        print(f"Extended system size: {n+m}×{n+m}")
+        print(f"Constrained DOFs: {constrained_dofs}")
+        
+        # 显示扩展矩阵的一部分
+        n_display = min(max_display, n + m)
+        print(f"\nExtended stiffness matrix S_extended (first {n_display}×{n_display}):")
+        print(np.round(S_extended[:n_display, :n_display], 2))
+        
+        print(f"\nExtended force vector f_extended (first {n_display} elements):")
+        print(np.round(f_extended[:n_display], 4))
+        
+        # 显示约束矩阵C
+        C = S_extended[:n, n:]
+        print(f"\nConstraint matrix C ({n}×{m}):")
+        print(C[:min(max_display, n), :])
+        
+        print("\n" + "="*80 + "\n")
     
     def plot_results(self):
         """Plot the displacement results."""
@@ -323,17 +444,41 @@ class BeamAnalysis:
 
 if __name__ == "__main__":
     # Configuration
-    BEAM_TYPE = "cantilever"  # Options: "cantilever" or "simply_supported"
+    BEAM_TYPE = "simply_supported"  # Options: "cantilever" or "simply_supported"
     LOAD_INTENSITY = 10.0     # Load intensity in N/m
     
     # Perform analysis
     analysis = BeamAnalysis(beam_type=BEAM_TYPE, load_intensity=LOAD_INTENSITY)
     displacement_results = analysis.solve()
     
+    # Display extended matrix structure (educational)
+    analysis.show_extended_matrix_structure(max_display=8)
+    
     # Display results
-    print(f"\nDisplacement results:")
-    print(f"Maximum displacement: {np.max(np.abs(displacement_results)):.6f} m")
-    print(f"Displacement at free end: {displacement_results[-1]:.6f} m")
+    print("\n" + "="*80)
+    print("结果 (Results)")
+    print("="*80)
+    
+    # Displacement results
+    print("\n位移 (Displacement):")
+    print(f"  Maximum displacement: {np.max(np.abs(displacement_results)):.6e} m")
+    print(f"  Displacement at end: {displacement_results[-1]:.6e} m")
+    print(f"  Displacement at start: {displacement_results[0]:.6e} m")
+    
+    # Rotation results (转角自由度 θ[2i+1])
+    if hasattr(analysis, 'rotation') and analysis.rotation is not None:
+        print("\n转角 (Rotation θ[2i+1]):")
+        print(f"  Maximum rotation: {np.max(np.abs(analysis.rotation)):.6e} rad")
+        print(f"  Rotation at end: {analysis.rotation[-1]:.6e} rad")
+        print(f"  Rotation at start: {analysis.rotation[0]:.6e} rad")
+    
+    # Display constraint forces (Lagrange multipliers)
+    if hasattr(analysis, 'constraint_forces'):
+        print(f"\n约束反力 (Constraint Forces / Lagrange Multipliers):")
+        for i, force in enumerate(analysis.constraint_forces):
+            print(f"  λ[{i}] = {force:.6e} N")
+    
+    print("="*80 + "\n")
     
     # Plot results
     analysis.plot_results()

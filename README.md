@@ -1,39 +1,58 @@
 # Project: Numerical Analysis
 
-## 1. Install [Pixi](https://pixi.sh/latest/installation/)
+Finite element method experiments for beam bending, static response, and modal
+analysis.
 
-## 2. Clone and Install
+## Project Structure
+
+```text
+.
++-- docs/                  # Reference PDFs and assignment notes
++-- outputs/
+|   +-- figures/           # Generated plots and images
++-- scripts/               # Runnable analysis scripts
+|   +-- my_plot_fun.py     # Hermite basis and plotting helper
+|   +-- static_beam.py     # Static beam FEM analysis
+|   +-- modal_analysis.py  # Modal analysis scaffold
++-- src/                   # Package source code
++-- pyproject.toml         # Project and Pixi configuration
++-- pixi.lock              # Locked environment
+```
+
+## Setup
+
+Install [Pixi](https://pixi.sh/latest/installation/), then run:
 
 ```bash
 git clone https://github.com/heyjiacheng/Project-Numerical-Analysis.git
 cd Project-Numerical-Analysis
 pixi install
-```
-
-### 3. Start
-start environment
-```bash
 pixi shell
 ```
-run basis function
+
+## Run Scripts
+
+Plot the Hermite basis interpolation example:
+
 ```bash
 python scripts/my_plot_fun.py
 ```
 
-run static
+Run the static beam analysis:
+
 ```bash
 python scripts/static_beam.py
 ```
 
-### 分工
-十一月七号把动态代码写完
-点点要做的
+Run the modal analysis scaffold:
+
 ```bash
-1. 考虑转角，比较运行结果；
-2. 显性组装extended matrix从而求解；
-3. 创建类对象时传入材料参数
+python scripts/modal_analysis.py
 ```
-阿澄要做的
-```bash
-1. 添加bending moment only at end point （现在只有constant load density）。
-```
+
+## Notes
+
+- Put generated figures in `outputs/figures/`.
+- Put reference material and reports in `docs/`.
+- Keep reusable Python package code in `src/`; keep one-off runnable examples in
+  `scripts/`.
