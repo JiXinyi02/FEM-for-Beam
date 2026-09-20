@@ -1,4 +1,4 @@
-# Project: Numerical Analysis
+# FEM for Beam
 
 Finite element method experiments for beam bending, static response, and modal
 analysis.
@@ -24,8 +24,8 @@ analysis.
 Install [Pixi](https://pixi.sh/latest/installation/), then run:
 
 ```bash
-git clone https://github.com/heyjiacheng/Project-Numerical-Analysis.git
-cd Project-Numerical-Analysis
+git clone https://github.com/JiXinyi02/FEM-for-Beam.git
+cd FEM-for-Beam
 pixi install
 pixi shell
 ```
