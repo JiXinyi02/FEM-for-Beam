@@ -2,16 +2,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 
-from my_plot_fun import (
+from beam_fem.plotting.beam import (
     animate_beam_motion,
-    automatic_visual_scale,
     plot_beam_snapshots,
     plot_energy,
     plot_tip_displacement,
-    resolve_scale,
-    sample_beam_shape,
 )
-from newmark import NewmarkBeamAnalysis
 
 
 def create_all_visualizations(
@@ -58,23 +54,3 @@ def create_all_visualizations(
     animate_beam_motion(result, x_nodes, output_path=paths["animation"], scale=scale)
 
     return paths
-
-
-if __name__ == "__main__":
-    analysis = NewmarkBeamAnalysis(
-        load_case="point_load_end",
-        P=1000.0,
-        total_time=0.05,
-        time_step=5e-4,
-    )
-    result = analysis.solve()
-    saved_paths = create_all_visualizations(
-        analysis,
-        result=result,
-        output_dir="newmark_visual_output",
-        prefix="point_load_end",
-    )
-
-    print("Saved Newmark visualizations:")
-    for name, path in saved_paths.items():
-        print(f"{name}: {path}")

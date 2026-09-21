@@ -1,11 +1,3 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from dataclasses import dataclass
-
-from beam_loads import assemble_load_vector, load_case_label
-from static_beam import BeamParameters, FiniteElementMatrices
-
-
 """
 Dynamic Bernoulli beam analysis with the Newmark method.
 
@@ -26,19 +18,13 @@ The default parameters beta=1/4 and gamma=1/2 are the stable average
 acceleration parameters recommended in the notes.
 """
 
+import numpy as np
 
-@dataclass
-class NewmarkResult:
-    time: np.ndarray
-    displacement: np.ndarray
-    velocity: np.ndarray
-    acceleration: np.ndarray
-    energy: np.ndarray
-    free_dofs: np.ndarray
-
-    @property
-    def tip_displacement(self):
-        return self.displacement[:, -2]
+from .beam_loads import assemble_load_vector
+from .elements import FiniteElementMatrices
+from .parameters import BeamParameters
+from .plotting import newmark as _plotting
+from .results import NewmarkResult
 
 
 class NewmarkBeamAnalysis:
@@ -77,7 +63,7 @@ class NewmarkBeamAnalysis:
         self.free_dofs = None
         self.result = None
 
-    
+
     # Newmark method only applies for non-fixed DOFs, so we need to identify the free DOFs:
 
     def _fixed_dofs(self):
@@ -186,7 +172,7 @@ class NewmarkBeamAnalysis:
             + self.beta * h ** 2 * stiffness
         )
 
-        
+
         for j in range(n_steps - 1):
             # Compute the mediate values u*, u'*:
             u_star = (
@@ -214,37 +200,5 @@ class NewmarkBeamAnalysis:
         return result
 
     def plot_tip_response(self, result=None):
-        result = result or self.result
-        if result is None:
-            result = self.solve()
-
-        plt.figure(figsize=(10, 6))
-        plt.plot(result.time, result.tip_displacement, label="Tip displacement")
-        plt.xlabel("Time (s)")
-        plt.ylabel("Displacement (m)")
-        plt.title(
-            f"Newmark dynamic response - "
-            f"{load_case_label(self.load_case, **self.load_params)}"
-        )
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-
-
-if __name__ == "__main__":
-    cases = [
-        ("uniform", {"q0": 10.0}),
-        ("point_load_end", {"P": 1000.0}),
-        ("end_moment", {"M": 1000.0}),
-    ]
-
-    for load_case, load_params in cases:
-        analysis = NewmarkBeamAnalysis(load_case=load_case, **load_params)
-        result = analysis.solve()
-
-        print("\n" + "=" * 60)
-        print(load_case_label(load_case, **load_params))
-        print(f"Final tip displacement: {result.tip_displacement[-1]:.6e} m")
-        print(f"Maximum tip displacement: {np.max(np.abs(result.tip_displacement)):.6e} m")
-        print(f"Final total energy: {result.energy[-1]:.6e}")
+        """Delegate to the newmark visualization function."""
+        return _plotting.plot_tip_response(self, result)

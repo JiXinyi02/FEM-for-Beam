@@ -1,20 +1,15 @@
-import numpy as np
-import time
-from matplotlib import pyplot as plt
-from static_beam import BeamAnalysis
-from beam_loads import (
-    LOAD_CASES,
-    assemble_load_vector,
-    analytic_cantilever_tip,
-    load_case_label,
-)
-from my_plot_fun import form, plot_piecewise_polynomial
-
 """
 In static_beam.py, boundary conditions are applied by deleting rows/columns (direct elimination).
 This file solves the same FEM system using the augmented-matrix method.
 The configuration is the same as in static_beam.py.
 """
+
+import numpy as np
+
+from .beam_loads import assemble_load_vector, analytic_cantilever_tip
+from .plotting import extended_matrix as _plotting
+from .static_beam import BeamAnalysis
+
 
 class BeamFEM:
     """
@@ -43,7 +38,7 @@ class BeamFEM:
         self.youngs_modulus = youngs_modulus           # Young's modulus (Pa)
         self.moment_inertia = moment_inertia             # Moment of inertia (m^4)
         self.density = density                 # Material density (kg/m^3)
-        
+
         # Derived properties
         self.node_positions = np.linspace(0, self.length, self.num_nodes)
         self.S = None
@@ -127,7 +122,7 @@ class BeamFEM:
 
         if self.S is None or self.F is None:
             self.assemble_global_matrices()
-        
+
         C, a = self.build_constraints(bc_type)
         r = len(a)
 
@@ -142,7 +137,7 @@ class BeamFEM:
         self.mu = u_constrained
 
         return u_free, u_constrained
-    
+
     # Compare the results with the static_beam.py:
 
     def compare_with_analytic_solution(self):
@@ -181,50 +176,5 @@ class BeamFEM:
         return w_tip_extended, w_tip_static, abs_difference, rel_difference
 
     def plot_piecewise_polynomial(self):
-        if self.u is None:
-            self.solve_static_extended()
-
-        plt.figure(figsize=(10, 6))
-        plot_piecewise_polynomial(self.u, self.node_positions)
-        plt.plot(self.node_positions, self.u[::2], "ro", markersize=4, label="Nodes")
-        plt.xlabel("Position along beam (m)")
-        plt.ylabel("Displacement (m)")
-        plt.title(f"Left-clamped beam - {load_case_label(self.load_case, **self.load_params)}")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
-
-
-if __name__ == "__main__":
-    cases = [
-        ("uniform", {"q0": 10.0}),
-        ("point_load_end", {"P": 1000.0}),
-        ("end_moment", {"M": 1000.0}),
-    ]
-
-    for load_case, load_params in cases:
-        print("\n" + "=" * 60)
-        print(load_case_label(load_case, **load_params))
-
-        beam_extended = BeamFEM(load_case=load_case, **load_params)
-        t0 = time.perf_counter()
-        beam_extended.solve_static_extended()
-        extended_time = time.perf_counter() - t0
-
-        t0 = time.perf_counter()
-        w_tip_extended, w_tip_static, abs_difference, rel_difference = (
-            beam_extended.compare_with_static_beam()
-        )
-        static_time = time.perf_counter() - t0
-
-        print(f"Tip deflection (extended matrix): {w_tip_extended:.6e} m")
-        print(f"Tip deflection (static_beam.py):  {w_tip_static:.6e} m")
-        print(f"Absolute difference:              {abs_difference:.6e} m")
-        print(f"Relative difference:              {rel_difference:.6e}")
-        print(f"Extended matrix time:             {extended_time:.6e} s")
-        print(f"static_beam.py time:              {static_time:.6e} s")
-        beam_extended.plot_piecewise_polynomial()
-
-
-
+        """Delegate to the extended_matrix visualization function."""
+        return _plotting.plot_piecewise_polynomial(self)

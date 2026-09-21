@@ -1,26 +1,3 @@
-from dataclasses import dataclass
-from pathlib import Path
-
-import numpy as np
-import matplotlib.pyplot as plt
-
-from constraints import fixed_dof_constraint_matrix, nullspace_basis
-from my_plot_fun import (
-    aligned_analytic_mode,
-    animate_beam_motion,
-    normalized_mode,
-    plot_beam_snapshots,
-    plot_energy,
-    plot_first_eigenmodes as draw_first_eigenmodes,
-    plot_frequency_errors as draw_frequency_errors,
-    plot_mode_shape_comparison as draw_mode_shape_comparison,
-    plot_tip_displacement,
-    sample_beam_shape,
-    save_frequency_error_table as write_frequency_error_table,
-)
-from static_beam import BeamParameters, FiniteElementMatrices
-
-
 """
 Free-vibration analysis with the eigenvalue method.
 
@@ -48,6 +25,15 @@ cantilever roots we use the equivalent condition
 with the starting approximation x_j = (j - 0.5) pi.
 Here, the solution is refined with Newton's method.
 """
+
+import numpy as np
+
+from .constraints import fixed_dof_constraint_matrix, nullspace_basis
+from .elements import FiniteElementMatrices
+from .parameters import BeamParameters
+from .plotting import eigenvalue as _plotting
+from .plotting.beam import aligned_analytic_mode, normalized_mode
+from .results import EigenvalueResult, FreeVibrationResult
 
 
 def cantilever_characteristic_initial_values(num_modes):
@@ -84,38 +70,6 @@ def cantilever_characteristic_residual_derivative(x):
     with np.errstate(over="ignore"):
         sech = 1.0 / np.cosh(x)
     return -np.sin(x) - sech * np.tanh(x)
-
-
-@dataclass
-class EigenvalueResult:
-    eigenvalues: np.ndarray
-    angular_frequencies: np.ndarray
-    frequencies_hz: np.ndarray
-    periods: np.ndarray
-    modes_reduced: np.ndarray
-    modes_full: np.ndarray
-    modal_mass: np.ndarray
-    modal_stiffness: np.ndarray
-    free_dofs: np.ndarray
-    constraint_matrix: np.ndarray
-    nullspace_basis: np.ndarray
-
-
-@dataclass
-class FreeVibrationResult:
-    time: np.ndarray
-    displacement: np.ndarray
-    velocity: np.ndarray
-    acceleration: np.ndarray
-    modal_coordinates: np.ndarray
-    energy: np.ndarray
-    free_dofs: np.ndarray
-    constraint_matrix: np.ndarray
-    nullspace_basis: np.ndarray
-
-    @property
-    def tip_displacement(self):
-        return self.displacement[:, -2]
 
 
 def cantilever_characteristic_values(num_modes, newton_steps=8, tolerance=1e-14):
@@ -264,7 +218,7 @@ class EigenvalueBeamAnalysis:
 
         """
         In oder to generalize the method to prepare for future frameworks, we calculate the eigenvalues
-        directly from the reduced mass and stiffness matrices. 
+        directly from the reduced mass and stiffness matrices.
         """
         # Use Cholesky factorization to convert the generalized eigenvalue problem to a standard one.
         cholesky_mass = np.linalg.cholesky(mass)
@@ -481,39 +435,12 @@ class EigenvalueBeamAnalysis:
             )
 
     def plot_mode_shapes(self, result=None, num_modes=None, include_analytic=True):
-        result = result or self.result or self.solve(num_modes)
-        num_modes = min(num_modes or len(result.angular_frequencies), len(result.angular_frequencies))
-
-        plt.figure(figsize=(10, 6))
-        for mode_index in range(num_modes):
-            mode = result.modes_full[:, mode_index]
-            mode = mode / np.max(np.abs(mode[::2]))
-            x_curve, w_curve = sample_beam_shape(mode, self.beam_params.node_positions)
-            plt.plot(x_curve, w_curve, label=f"FEM mode {mode_index + 1}")
-
-            if include_analytic:
-                analytic_mode = self.analytic_mode_dofs(mode_index + 1)
-                x_exact, w_exact = sample_beam_shape(analytic_mode, self.beam_params.node_positions)
-                plt.plot(x_exact, w_exact, "--", alpha=0.7, label=f"Analytic mode {mode_index + 1}")
-
-        plt.axhline(0.0, color="0.2", linewidth=1)
-        plt.xlabel("Position along beam (m)")
-        plt.ylabel("Normalized mode shape")
-        plt.title(f"{self.beam_type.replace('_', ' ').title()} beam mode shapes")
-        plt.grid(True, alpha=0.3)
-        plt.legend()
-        plt.tight_layout()
-        plt.show()
+        """Delegate to the eigenvalue visualization function."""
+        return _plotting.plot_mode_shapes(self, result, num_modes, include_analytic)
 
     def plot_tip_response(self, response):
-        plt.figure(figsize=(10, 5))
-        plt.plot(response.time, response.tip_displacement, linewidth=2)
-        plt.xlabel("Time (s)")
-        plt.ylabel("Tip displacement (m)")
-        plt.title("Free-vibration tip response by modal superposition")
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.show()
+        """Delegate to the eigenvalue visualization function."""
+        return _plotting.plot_tip_response(self, response)
 
     def _normalized_mode(self, dof_vector):
         return normalized_mode(dof_vector)
@@ -522,58 +449,44 @@ class EigenvalueBeamAnalysis:
         return aligned_analytic_mode(self, numerical_mode, mode_number)
 
     def plot_mode_shape_comparison(
-            self,
-            result=None,
-            num_modes=5,
-            save_path=None,
-            show=True,
+        self,
+        result=None,
+        num_modes=5,
+        save_path=None,
+        show=True,
     ):
         """Plot FEM and analytic mode shapes side by side for the first modes."""
-        result = result or self.result or self.solve(num_modes)
-        return draw_mode_shape_comparison(
+        return _plotting.plot_mode_shape_comparison(
             self,
             result,
-            num_modes=num_modes,
-            save_path=save_path,
-            show=show,
+            num_modes,
+            save_path,
+            show,
         )
 
     def plot_frequency_errors(
-            self,
-            result=None,
-            num_modes=5,
-            save_path=None,
-            show=True,
+        self,
+        result=None,
+        num_modes=5,
+        save_path=None,
+        show=True,
     ):
         """Plot FEM natural-frequency relative errors against analytic values."""
-        result = result or self.result or self.solve(num_modes)
-        comparison = self.compare_with_analytic(result, num_modes)
-        return draw_frequency_errors(comparison, save_path=save_path, show=show)
+        return _plotting.plot_frequency_errors(self, result, num_modes, save_path, show)
 
     def save_frequency_error_table(self, result=None, num_modes=5, save_path=None):
         """Write a CSV table with FEM/analytic frequencies and relative errors."""
-        result = result or self.result or self.solve(num_modes)
-        comparison = self.compare_with_analytic(result, num_modes)
-        if save_path is None:
-            save_path = Path("figs/eigenvalue_visual_output/frequency_errors.csv")
-        return write_frequency_error_table(comparison, save_path)
+        return _plotting.save_frequency_error_table(self, result, num_modes, save_path)
 
     def plot_first_eigenmodes(
-            self,
-            result=None,
-            num_modes=5,
-            save_path=None,
-            show=True,
+        self,
+        result=None,
+        num_modes=5,
+        save_path=None,
+        show=True,
     ):
         """Plot the first numerical eigenmodes in one stacked figure."""
-        result = result or self.result or self.solve(num_modes)
-        return draw_first_eigenmodes(
-            self,
-            result,
-            num_modes=num_modes,
-            save_path=save_path,
-            show=show,
-        )
+        return _plotting.plot_first_eigenmodes(self, result, num_modes, save_path, show)
 
     def standing_wave_response(
             self,
@@ -624,206 +537,85 @@ class EigenvalueBeamAnalysis:
         )
 
     def save_standing_wave_visualizations(
-            self,
-            result=None,
-            output_dir="figs/eigenvalue_visual_output",
-            prefix=None,
-            mode_number=1,
-            amplitude=1e-3,
-            periods=2.0,
-            frames_per_period=60,
-            snapshot_time_step=None,
-            scale="auto",
-            video_extension=".gif",
-            fps=30,
+        self,
+        result=None,
+        output_dir='figs/eigenvalue_visual_output',
+        prefix=None,
+        mode_number=1,
+        amplitude=0.001,
+        periods=2.0,
+        frames_per_period=60,
+        snapshot_time_step=None,
+        scale='auto',
+        video_extension='.gif',
+        fps=30,
     ):
         """Save snapshots and an animation for a single standing-wave mode."""
-        result = result or self._result_with_at_least(mode_number)
-        response = self.standing_wave_response(
-            result=result,
-            mode_number=mode_number,
-            amplitude=amplitude,
-            periods=periods,
-            frames_per_period=frames_per_period,
+        return _plotting.save_standing_wave_visualizations(
+            self,
+            result,
+            output_dir,
+            prefix,
+            mode_number,
+            amplitude,
+            periods,
+            frames_per_period,
+            snapshot_time_step,
+            scale,
+            video_extension,
+            fps,
         )
-
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        if prefix is None:
-            prefix = f"{self.beam_type}_mode_{mode_number}_standing_wave"
-        if not video_extension.startswith("."):
-            video_extension = f".{video_extension}"
-
-        paths = {
-            "snapshots": output_dir / f"{prefix}_snapshots.png",
-            "animation": output_dir / f"{prefix}_animation{video_extension}",
-        }
-        x_nodes = self.beam_params.node_positions
-
-        period = 2.0 * np.pi / result.angular_frequencies[mode_number - 1]
-        if snapshot_time_step is None:
-            snapshot_time_step = period / 8.0
-
-        plot_beam_snapshots(
-            response,
-            x_nodes,
-            snapshot_time_step=snapshot_time_step,
-            time_start=0.0,
-            time_end=period,
-            scale=scale,
-            save_path=paths["snapshots"],
-            show=False,
-        )
-        plt.close()
-        animate_beam_motion(
-            response,
-            x_nodes,
-            output_path=paths["animation"],
-            scale=scale,
-            frame_step=1,
-            fps=fps,
-        )
-        return paths
 
     def save_modal_analysis_outputs(
-            self,
-            result=None,
-            output_dir="figs/eigenvalue_visual_output",
-            num_modes=5,
-            standing_wave_mode=1,
-            video_extension=".gif",
-            snapshot_time_step=None,
+        self,
+        result=None,
+        output_dir='figs/eigenvalue_visual_output',
+        num_modes=5,
+        standing_wave_mode=1,
+        video_extension='.gif',
+        snapshot_time_step=None,
     ):
         """Save the standard eigenvalue report figures requested by the project."""
-        result = result or self.solve(num_modes)
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-        prefix = self.beam_type
-
-        paths = {
-            "mode_shape_comparison": output_dir / f"{prefix}_mode_shape_comparison.png",
-            "frequency_errors": output_dir / f"{prefix}_frequency_errors.png",
-            "frequency_error_table": output_dir / f"{prefix}_frequency_errors.csv",
-            "first_eigenmodes": output_dir / f"{prefix}_first_{num_modes}_eigenmodes.png",
-        }
-
-        self.plot_mode_shape_comparison(
-            result=result,
-            num_modes=num_modes,
-            save_path=paths["mode_shape_comparison"],
-            show=False,
+        return _plotting.save_modal_analysis_outputs(
+            self,
+            result,
+            output_dir,
+            num_modes,
+            standing_wave_mode,
+            video_extension,
+            snapshot_time_step,
         )
-        self.plot_frequency_errors(
-            result=result,
-            num_modes=num_modes,
-            save_path=paths["frequency_errors"],
-            show=False,
-        )
-        self.save_frequency_error_table(
-            result=result,
-            num_modes=num_modes,
-            save_path=paths["frequency_error_table"],
-        )
-        self.plot_first_eigenmodes(
-            result=result,
-            num_modes=num_modes,
-            save_path=paths["first_eigenmodes"],
-            show=False,
-        )
-
-        standing_wave_paths = self.save_standing_wave_visualizations(
-            result=result,
-            output_dir=output_dir,
-            prefix=f"{prefix}_mode_{standing_wave_mode}_standing_wave",
-            mode_number=standing_wave_mode,
-            video_extension=video_extension,
-            snapshot_time_step=snapshot_time_step,
-        )
-        paths.update({
-            "standing_wave_snapshots": standing_wave_paths["snapshots"],
-            "standing_wave_animation": standing_wave_paths["animation"],
-        })
-        return paths
 
     def save_free_vibration_visualizations(
-            self,
-            response=None,
-            output_dir="figs/eigenvalue_visual_output",
-            prefix=None,
-            scale="auto",
-            video_extension=".gif",
-            frame_step=1,
-            snapshot_time_step=None,
-            snapshot_time_start=None,
-            snapshot_time_end=None,
-            fps=30,
+        self,
+        response=None,
+        output_dir='figs/eigenvalue_visual_output',
+        prefix=None,
+        scale='auto',
+        video_extension='.gif',
+        frame_step=1,
+        snapshot_time_step=None,
+        snapshot_time_start=None,
+        snapshot_time_end=None,
+        fps=30,
     ):
         """
-        Reuse the Newmark visualization helpers for eigenvalue free vibration.
+            Reuse the Newmark visualization helpers for eigenvalue free vibration.
 
-        The eigenvalue FreeVibrationResult has the same plotting fields used by
-        newmark_visualization.py: time, displacement, energy, and
-        tip_displacement.
-        """
-        response = response or self.free_vibration_response()
-        output_dir = Path(output_dir)
-        output_dir.mkdir(parents=True, exist_ok=True)
-
-        if prefix is None:
-            prefix = f"{self.beam_type}_free_vibration"
-        if not video_extension.startswith("."):
-            video_extension = f".{video_extension}"
-
-        x_nodes = self.beam_params.node_positions
-        paths = {
-            "tip": output_dir / f"{prefix}_tip_displacement.png",
-            "energy": output_dir / f"{prefix}_energy.png",
-            "snapshots": output_dir / f"{prefix}_beam_snapshots.png",
-            "video": output_dir / f"{prefix}_beam_motion{video_extension}",
-        }
-
-        plot_tip_displacement(response, save_path=paths["tip"], show=False)
-        plt.close()
-        plot_energy(response, save_path=paths["energy"], show=False)
-        plt.close()
-        plot_beam_snapshots(
+            The eigenvalue FreeVibrationResult has the same plotting fields used by
+            newmark_visualization.py: time, displacement, energy, and
+            tip_displacement.
+            """
+        return _plotting.save_free_vibration_visualizations(
+            self,
             response,
-            x_nodes,
-            scale=scale,
-            snapshot_time_step=snapshot_time_step,
-            time_start=snapshot_time_start,
-            time_end=snapshot_time_end,
-            save_path=paths["snapshots"],
-            show=False,
+            output_dir,
+            prefix,
+            scale,
+            video_extension,
+            frame_step,
+            snapshot_time_step,
+            snapshot_time_start,
+            snapshot_time_end,
+            fps,
         )
-        plt.close()
-        animate_beam_motion(
-            response,
-            x_nodes,
-            output_path=paths["video"],
-            scale=scale,
-            frame_step=frame_step,
-            fps=fps,
-        )
-
-        return paths
-
-if __name__ == "__main__":
-    NUM_MODES = 5
-    OUTPUT_DIR = "figs/eigenvalue_visual_output"
-
-    analysis = EigenvalueBeamAnalysis(beam_type="cantilever", num_modes=NUM_MODES)
-    eigen_result = analysis.solve()
-    analysis.print_frequency_table(eigen_result)
-
-    saved_paths = analysis.save_modal_analysis_outputs(
-        result=eigen_result,
-        output_dir=OUTPUT_DIR,
-        num_modes=NUM_MODES,
-        standing_wave_mode=1,
-        video_extension=".gif",
-    )
-
-    print("\nSaved eigenvalue visualizations:")
-    for name, path in saved_paths.items():
-        print(f"{name}: {path}")

@@ -10,7 +10,9 @@ Global load vector entries follow the weak form  S w = q + Q_L e_L + M_L d_L  (P
 """
 
 import numpy as np
-from my_plot_fun import form
+
+from .interpolation import form
+
 
 LOAD_CASES = ("uniform", "point_load_end", "end_moment")
 
@@ -167,3 +169,25 @@ def analytic_cantilever_tip(E, I, L, load_case, **params):
         M = params.get("M", 1000.0)
         return M * L ** 2 / (2 * E * I)
     raise ValueError(f"No analytic solution for load case: {load_case}")
+
+
+class LoadApplication:
+    """Handles application of loads to the beam structure."""
+
+    def __init__(self, beam_params):
+        self.beam = beam_params
+        self.total_dofs = 2 * beam_params.num_nodes
+
+    def apply_load(self, load_case="uniform", **params):
+        """
+        Assemble the global load vector for one of the three standard cases.
+
+        Args:
+            load_case: "uniform", "point_load_end", or "end_moment"
+            **params: q0/P/M depending on the case
+        """
+        return assemble_load_vector(self.beam, load_case, **params)
+
+    def apply_uniform_load(self, load_intensity):
+        """Backward-compatible wrapper for uniform load."""
+        return self.apply_load("uniform", q0=load_intensity)
